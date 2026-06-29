@@ -1,0 +1,402 @@
+{
+  "name": "Daily Email Triage (Outlook → AI → Email + Telegram)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 10
+            }
+          ]
+        }
+      },
+      "id": "13797367-7abd-4c10-ad1f-38e5b2882c90",
+      "name": "Every Day 10:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        64,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "not-friday",
+              "leftValue": "={{ $now.weekday }}",
+              "rightValue": 5,
+              "operator": {
+                "type": "number",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "not-saturday",
+              "leftValue": "={{ $now.weekday }}",
+              "rightValue": 6,
+              "operator": {
+                "type": "number",
+                "operation": "notEquals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fddbf6de-1bac-4103-ac23-1aa041365b82",
+      "name": "Skip Fri & Sat",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        352,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "returnAll": true,
+        "filtersUI": {
+          "values": {
+            "filters": {
+              "foldersToInclude": [
+                "AQMkADljN2I0ZGE5LWFhAWQtNDY2ADItYTViYS1mYjVhNjVlOWY5ODEALgAAAwEP7usYLzRMuVwM4gyjUAgBADlcMY00rM9Jk2t_vd1aa-cAAAIBDAAAAA=="
+              ],
+              "readStatus": "unread"
+            }
+          }
+        },
+        "options": {}
+      },
+      "id": "6fde1ef6-8653-4dca-949c-e3fe9499799d",
+      "name": "Get Unread Emails",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        624,
+        400
+      ],
+      "alwaysOutputData": true,
+      "webhookId": "da9b6a4d-0950-4aa3-8298-c5510cb8846d",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "MOzSqQ63efamE0kB",
+          "name": "Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "has-id",
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "bd7845db-06b7-4057-acf9-2938b6398855",
+      "name": "Any Unread Emails?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        880,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Runs once over ALL unread emails.\n// Tags each email with its chunk number and the total chunk count,\n// and flattens the Outlook message into clean fields for the AI.\nconst items = $input.all();\nconst total = items.length;\nconst totalBatches = Math.ceil(total / 10);\n\nreturn items.map((item, i) => {\n  const m = item.json;\n  const from = m.from?.emailAddress?.address\n    || m.sender?.emailAddress?.address\n    || 'Unknown sender';\n  const fromName = m.from?.emailAddress?.name\n    || m.sender?.emailAddress?.name\n    || '';\n  // Prefer the short preview; fall back to stripping HTML from the body.\n  let bodyPreview = m.bodyPreview || '';\n  if (!bodyPreview && m.body?.content) {\n    bodyPreview = String(m.body.content).replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim();\n  }\n  bodyPreview = bodyPreview.slice(0, 600);\n\n  return {\n    json: {\n      from,\n      fromName,\n      subject: m.subject || '(no subject)',\n      bodyPreview,\n      receivedDateTime: m.receivedDateTime || '',\n      batchNumber: Math.floor(i / 10) + 1,\n      totalBatches,\n    },\n  };\n});"
+      },
+      "id": "3665f8e7-420d-4c8c-819a-bde7742ca2ba",
+      "name": "Prepare & Number Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1152,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "id": "5d4b87b6-c12f-43f3-a9ba-3c19612c75d8",
+      "name": "Loop 10 at a Time",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1408,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Runs once per loop pass over the CURRENT batch (up to 10 emails).\n// Collapses the batch into a single item containing one text block\n// for the AI, plus the carried-through batch metadata.\nconst items = $input.all();\nconst batchNumber = items[0].json.batchNumber;\nconst totalBatches = items[0].json.totalBatches;\nconst count = items.length;\n\nconst emailsText = items.map((it, idx) => {\n  const e = it.json;\n  const sender = e.fromName ? `${e.fromName} <${e.from}>` : e.from;\n  return [\n    `Email ${idx + 1}:`,\n    `From: ${sender}`,\n    `Received: ${e.receivedDateTime}`,\n    `Subject: ${e.subject}`,\n    `Body: ${e.bodyPreview}`,\n  ].join('\\n');\n}).join('\\n\\n---\\n\\n');\n\nreturn [{\n  json: {\n    batchNumber,\n    totalBatches,\n    count,\n    emailsText,\n  },\n}];"
+      },
+      "id": "2cb5f752-23b9-423c-be01-326e5a48e8f1",
+      "name": "Build Chunk Summary Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1696,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are summarizing batch {{ $json.batchNumber }} of {{ $json.totalBatches }}. This batch contains {{ $json.count }} email(s).\n\nUse exactly these batch numbers in your header: Batch {{ $json.batchNumber }} of {{ $json.totalBatches }}.\n\nHere are the emails:\n\n{{ $json.emailsText }}",
+        "options": {
+          "systemMessage": "You are an executive email-triage assistant. You analyze emails and output ONLY valid JSON — nothing else.\nOutput exactly this JSON structure (no markdown fences, no commentary, no text before or after):\n{\n  \"overview\": \"1-3 sentence summary of the batch composition\",\n  \"emails\": [\n    {\n      \"urgency\": \"URGENT\" | \"ACTION NEEDED\" | \"FYI\" | \"LOW PRIORITY\",\n      \"sender\": \"sender name or address\",\n      \"subject\": \"email subject line\",\n      \"summary\": \"1-2 sentence summary of the email content\",\n      \"deadline\": \"deadline if mentioned, otherwise null\"\n    }\n  ]\n}\nRULES:\n- Output ONLY the JSON object. No markdown, no code fences, no explanation.\n- The \"emails\" array must be sorted by urgency: URGENT first, then ACTION NEEDED, then FYI, then LOW PRIORITY. Within the same urgency level, sort by soonest deadline first.\n- Infer urgency purely from subject + body wording. Look for: \"ASAP\", \"urgent\", \"by EOD\", \"today\", explicit dates, outages, escalations, payments due.\n- Use exactly one of the four urgency levels: URGENT, ACTION NEEDED, FYI, LOW PRIORITY.\n- Keep summaries terse and factual.\n- Set \"deadline\" to null if no deadline is mentioned.\n- The overview should describe the composition, e.g. \"This batch contains 5 emails: 2 action items, 1 appointment notice, 1 system alert, 1 promotional email.\"\n\nDESIGN TOKENS:\nBrand palette (use for UI chrome, backgrounds, accents):\n  Primary Dark:  #293681\n  Primary Blue:  #4274D9\n  Accent Teal:   #95CCDD\n  Light Teal:    #D0E7E6\n\nStatus colors (map urgency levels exactly as follows):\n  URGENT:        #FF0052\n  ACTION NEEDED: #FFD400\n  FYI:           #0055DA\n  LOW PRIORITY:  #00C68D"
+        }
+      },
+      "id": "5e357913-9b22-46a3-8a7e-eba063dfad62",
+      "name": "Summarize Chunk (AI Agent)",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        1920,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "o4-mini",
+          "mode": "list",
+          "cachedResultName": "o4-mini"
+        },
+        "options": {}
+      },
+      "id": "ac8088c4-edc0-4dbe-916d-8938efa67a32",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1920,
+        576
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "fwAYhcvarexHeNhm",
+          "name": "Company lite llm gpt"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.output || '{}';\nconst batchNumber = $('Build Chunk Summary Input').item.json.batchNumber;\nconst totalBatches = $('Build Chunk Summary Input').item.json.totalBatches;\n\nlet data;\ntry {\n  const cleaned = raw.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/i, '').trim();\n  data = JSON.parse(cleaned);\n} catch (e) {\n  return [{ json: { emailHtml: '<div style=\"font-family:Segoe UI,Arial,sans-serif;padding:20px;\"><p>AI output could not be parsed as JSON. Raw output:</p><pre>' + raw.replace(/</g,'&lt;') + '</pre></div>', batchNumber, totalBatches } }];\n}\n\nconst overview = data.overview || 'No overview available.';\nconst emails = data.emails || [];\nconst today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });\n\nconst urgencyMeta = {\n  'URGENT':        { color: '#FF2D55', glow: '#FF2D5530', label: '🔴 URGENT' },\n  'ACTION NEEDED': { color: '#FF9500', glow: '#FF950030', label: '🟠 ACTION NEEDED' },\n  'FYI':           { color: '#00C7FF', glow: '#00C7FF30', label: '🔵 FYI' },\n  'LOW PRIORITY':  { color: '#00E676', glow: '#00E67630', label: '🟢 LOW PRIORITY' },\n};\n\nconst urgencyOrder = ['URGENT', 'ACTION NEEDED', 'FYI', 'LOW PRIORITY'];\nconst getUrgencyRank = (u) => { const idx = urgencyOrder.indexOf(u); return idx === -1 ? 99 : idx; };\nconst sorted = [...emails].sort((a, b) => getUrgencyRank(a.urgency) - getUrgencyRank(b.urgency));\nconst esc = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');\n\nlet emailRows = '';\nfor (let i = 0; i < sorted.length; i++) {\n  const em = sorted[i];\n  const meta = urgencyMeta[em.urgency] || urgencyMeta['FYI'];\n  const isLast = i === sorted.length - 1;\n  \n  let deadlineHtml = '';\n  if (em.deadline && em.deadline !== 'null' && em.deadline !== null) {\n    deadlineHtml = `\n      <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"margin-top:12px;\">\n        <tr>\n          <td style=\"background:${meta.glow};border-left:3px solid ${meta.color};padding:10px 14px;border-radius:0 6px 6px 0;\">\n            <span style=\"font-size:12px;color:${meta.color};font-weight:700;letter-spacing:0.5px;\">⏰ DEADLINE: ${esc(em.deadline)}</span>\n          </td>\n        </tr>\n      </table>`;\n  }\n\n  emailRows += `\n    <!-- EMAIL CARD ${i+1} -->\n    <tr>\n      <td style=\"padding:0 0 14px 0;\">\n        <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"background:#0F172A;border:1px solid #1E293B;border-radius:10px;overflow:hidden;\">\n          <tr>\n            <!-- NEON LEFT BORDER -->\n            <td width=\"5\" style=\"background:${meta.color};font-size:0;line-height:0;\">&nbsp;</td>\n            <td style=\"padding:22px 26px;\">\n              <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\">\n                <!-- BADGE ROW -->\n                <tr>\n                  <td style=\"padding-bottom:10px;\">\n                    <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\">\n                      <tr>\n                        <td style=\"background:${meta.glow};border:1px solid ${meta.color};border-radius:20px;padding:5px 14px;\">\n                          <span style=\"font-size:11px;font-weight:800;color:${meta.color};text-transform:uppercase;letter-spacing:1px;\">${esc(meta.label)}</span>\n                        </td>\n                      </tr>\n                    </table>\n                  </td>\n                </tr>\n                <!-- SENDER -->\n                <tr>\n                  <td style=\"padding-bottom:4px;\">\n                    <span style=\"font-size:15px;font-weight:700;color:#F8FAFC;letter-spacing:-0.3px;\">${esc(em.sender)}</span>\n                  </td>\n                </tr>\n                <!-- SUBJECT -->\n                <tr>\n                  <td style=\"padding-bottom:10px;\">\n                    <span style=\"font-size:14px;font-weight:600;color:${meta.color};letter-spacing:-0.2px;\">${esc(em.subject)}</span>\n                  </td>\n                </tr>\n                <!-- SUMMARY -->\n                <tr>\n                  <td>\n                    <span style=\"font-size:13px;color:#94A3B8;line-height:1.7;\">${esc(em.summary)}</span>\n                    ${deadlineHtml}\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n        </table>\n      </td>\n    </tr>`;\n}\n\nconst urgencyCounts = {};\nfor (const em of sorted) {\n  urgencyCounts[em.urgency] = (urgencyCounts[em.urgency] || 0) + 1;\n}\n\nlet statsHtml = '';\nfor (const level of urgencyOrder) {\n  if (urgencyCounts[level]) {\n    const meta = urgencyMeta[level];\n    statsHtml += `\n      <td style=\"padding:0 6px 0 0;\">\n        <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\">\n          <tr>\n            <td style=\"background:${meta.glow};border:1px solid ${meta.color};border-radius:20px;padding:6px 16px;\">\n              <span style=\"font-size:11px;font-weight:800;color:${meta.color};text-transform:uppercase;letter-spacing:0.8px;\">${urgencyCounts[level]} ${esc(level)}</span>\n            </td>\n          </tr>\n        </table>\n      </td>`;\n  }\n}\n\nconst html = `<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\">\n  <meta name=\"color-scheme\" content=\"dark\">\n  <meta name=\"supported-color-schemes\" content=\"dark light\">\n</head>\n<body style=\"margin:0;padding:0;background:#020617;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;\">\n  <!-- OUTER SHELL -->\n  <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"background:#020617;\">\n    <tr>\n      <td align=\"center\" style=\"padding:40px 16px;\">\n        <!-- MAIN CONTAINER -->\n        <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"700\" style=\"max-width:700px;width:100%;\">\n          \n          <!-- HEADER: DARK GRADIENT SIMULATION -->\n          <tr>\n            <td style=\"background:#0B1120;border:1px solid #1E293B;border-bottom:3px solid #3B82F6;border-radius:14px 14px 0 0;padding:36px 32px 28px 32px;\">\n              <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\">\n                <tr>\n                  <td style=\"padding-bottom:6px;\">\n                    <span style=\"font-size:32px;font-weight:900;color:#FFFFFF;letter-spacing:-1px;text-shadow:0 2px 10px rgba(59,130,246,0.3);\">📨 EMAIL SUMMARY</span>\n                  </td>\n                </tr>\n                <tr>\n                  <td style=\"padding-bottom:18px;\">\n                    <span style=\"font-size:13px;color:#64748B;font-weight:600;letter-spacing:0.5px;\">BATCH ${batchNumber} OF ${totalBatches} &nbsp;•&nbsp; ${esc(today)} &nbsp;•&nbsp; ${sorted.length} EMAIL${sorted.length !== 1 ? 'S' : ''}</span>\n                  </td>\n                </tr>\n                <tr>\n                  <td>\n                    <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\"><tr>${statsHtml}</tr></table>\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n          \n          <!-- OVERVIEW SECTION -->\n          <tr>\n            <td style=\"background:#0F172A;border-left:1px solid #1E293B;border-right:1px solid #1E293B;padding:28px 32px;\">\n              <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\">\n                <tr>\n                  <td style=\"background:#1E293B;border-left:4px solid #3B82F6;border-radius:0 10px 10px 0;padding:18px 22px;\">\n                    <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\">\n                      <tr>\n                        <td style=\"padding-bottom:8px;\">\n                          <span style=\"font-size:11px;font-weight:900;color:#60A5FA;text-transform:uppercase;letter-spacing:2px;\">⚡ Overview</span>\n                        </td>\n                      </tr>\n                      <tr>\n                        <td>\n                          <span style=\"font-size:14px;color:#CBD5E1;line-height:1.7;\">${esc(overview)}</span>\n                        </td>\n                      </tr>\n                    </table>\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n          \n          <!-- EMAIL LIST -->\n          <tr>\n            <td style=\"background:#0F172A;border-left:1px solid #1E293B;border-right:1px solid #1E293B;padding:8px 32px 24px 32px;\">\n              <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\">\n                ${emailRows}\n              </table>\n            </td>\n          </tr>\n          \n          <!-- FOOTER -->\n          <tr>\n            <td style=\"background:#0B1120;border:1px solid #1E293B;border-top:2px solid #1E293B;border-radius:0 0 14px 14px;padding:22px 32px;\">\n              <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\">\n                <tr>\n                  <td style=\"text-align:center;\">\n                    <span style=\"font-size:11px;color:#475569;font-weight:700;letter-spacing:1px;text-transform:uppercase;\">Generated by Email Triage AI &nbsp;•&nbsp; ${esc(today)}</span>\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n          \n        </table>\n      </td>\n    </tr>\n  </table>\n</body>\n</html>`;\n\nreturn [{ json: { emailHtml: html, batchNumber, totalBatches, aiData: data } }];"
+      },
+      "id": "c198deb3-f8ee-4b89-bc23-aee71a9ac907",
+      "name": "Render Email HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2304,
+        592
+      ]
+    },
+    {
+      "parameters": {
+        "toRecipients": "aalqarni@arabiancement.com.sa",
+        "subject": "=Email Summary — Batch {{ $('Render Email HTML').item.json.batchNumber }} of {{ $('Render Email HTML').item.json.totalBatches }}",
+        "bodyContent": "={{ $('Render Email HTML').item.json.emailHtml }}",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "id": "3e1fce5b-b9da-48a9-9533-53b5d96720a8",
+      "name": "Send Email Summary",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        2576,
+        752
+      ],
+      "webhookId": "e53feba2-86f2-409c-a57a-f11b38a26e2f",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "MOzSqQ63efamE0kB",
+          "name": "Outlook account"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "Summarize Chunk (AI Agent)": [
+      {
+        "json": {
+          "output": "{\"overview\":\"This batch contains 5 emails: 2 requiring action, 2 informational notices, and 1 promotional email.\",\"emails\":[{\"urgency\":\"ACTION NEEDED\",\"sender\":\"Unknown sender\",\"subject\":\"طلب تدريب تعاوني صيفي - عبدالرحمن حزام القحطاني - تخصص نظم معلومات\",\"summary\":\"Abdulrahman Hizam Alqahtani applies for a summer cooperative training in Information Systems to HR.\",\"deadline\":null},{\"urgency\":\"ACTION NEEDED\",\"sender\":\"Unknown sender\",\"subject\":\"FW: Change ID :##CH-187## has been assigned to you/your group as ChangeRequester\",\"summary\":\"Notification that Change ID CH-187 has been assigned to the recipient's group as the Change Requester.\",\"deadline\":null},{\"urgency\":\"FYI\",\"sender\":\"Unknown sender\",\"subject\":\"قرار تعيين رقم (8)\",\"summary\":\"Appointment of Mr. Hattan Ibrahim Alraiqi as Electrical Technician in Electrical Maintenance starting 01 July 2026, job number 5926.\",\"deadline\":null},{\"urgency\":\"FYI\",\"sender\":\"Unknown sender\",\"subject\":\"RB SQL Server\",\"summary\":\"Brief email regarding RB SQL Server addressed to Mr. Abdulrahman Mohammed Alqarni.\",\"deadline\":null},{\"urgency\":\"LOW PRIORITY\",\"sender\":\"Unknown sender\",\"subject\":\"Microsoft D365 Business Solutions - Intouch | Galaxy IT Systems\",\"summary\":\"Promotional email from Intouch Galaxy Solutions marketing Dynamics 365 Business Solutions.\",\"deadline\":null}]}"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Every Day 10:00": {
+      "main": [
+        [
+          {
+            "node": "Skip Fri & Sat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Fri & Sat": {
+      "main": [
+        [
+          {
+            "node": "Get Unread Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Unread Emails": {
+      "main": [
+        [
+          {
+            "node": "Any Unread Emails?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Unread Emails?": {
+      "main": [
+        [
+          {
+            "node": "Prepare & Number Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare & Number Emails": {
+      "main": [
+        [
+          {
+            "node": "Loop 10 at a Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop 10 at a Time": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Build Chunk Summary Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Chunk Summary Input": {
+      "main": [
+        [
+          {
+            "node": "Summarize Chunk (AI Agent)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Summarize Chunk (AI Agent)",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize Chunk (AI Agent)": {
+      "main": [
+        [
+          {
+            "node": "Render Email HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render Email HTML": {
+      "main": [
+        [
+          {
+            "node": "Send Email Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email Summary": {
+      "main": [
+        [
+          {
+            "node": "Loop 10 at a Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "bec8f753-95b9-4540-8be3-39a2d9b4efff",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3aa5d05bd944b1a046a965028417fe45892f642260fb797fac57ae0d5403a374"
+  },
+  "nodeGroups": [],
+  "id": "ks45CemuGb4jy7NX",
+  "tags": []
+}

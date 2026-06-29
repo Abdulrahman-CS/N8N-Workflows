@@ -1,0 +1,878 @@
+{
+  "name": "Jobs Search",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "adc8bc85-4d90-42b4-a994-b0506b52560c",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        208,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a0000000-0000-4000-8000-000000000001",
+              "name": "query",
+              "value": "محاسب, مطور ERP, محلل بيانات, مطور BI, موظف موارد بشرية",
+              "type": "string"
+            },
+            {
+              "id": "a0000000-0000-4000-8000-000000000002",
+              "name": "chatId",
+              "value": "PUT_YOUR_TELEGRAM_CHAT_ID_HERE",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e8908719-1a65-45ab-89c8-6a9e9b3ca5f2",
+      "name": "Set Query",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        432,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.wadhefa.com/cross_network/latest_jobs_rss.php",
+        "options": {}
+      },
+      "id": "4d6426ea-0030-4d53-8227-2d41cb1a8307",
+      "name": "Wadhefa RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        352
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const j = item.json;\n  return {\n    json: {\n      title: (j.title || '').trim(),\n      description: (j.contentSnippet || j.content || '').toString().trim(),\n      url: j.link || '',\n      date: 'اليوم',\n      source: 'wadhefa.com'\n    }\n  };\n});"
+      },
+      "id": "77586467-3113-4fe2-bebe-18e7f90db76f",
+      "name": "Format Wadhefa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.ewdifh.com/category/all-jobs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "e416501f-81f1-4475-bcc2-03de9e58b6e7",
+      "name": "Ewdifh HTTP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        672,
+        544
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "cards",
+              "cssSelector": "div.bg-white.rounded-md.shadow.p-3.w-full",
+              "returnValue": "html",
+              "returnArray": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "42c9a214-ed4a-48d9-8794-fb4a4597a004",
+      "name": "Ewdifh Cards",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "cards",
+        "options": {}
+      },
+      "id": "cdad5a55-8d03-4c4b-9cc3-ac8cffa37a2f",
+      "name": "Ewdifh Split",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        1104,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "dataPropertyName": "cards",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "title",
+              "cssSelector": "div.text-base.font-semibold a"
+            },
+            {
+              "key": "url",
+              "cssSelector": "div.text-base.font-semibold a",
+              "returnValue": "attribute",
+              "attribute": "href"
+            },
+            {
+              "key": "company",
+              "cssSelector": "a[href*=\"/job/org/\"]"
+            },
+            {
+              "key": "date",
+              "cssSelector": ".fa-clock + span"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "53d48cfd-cb48-443d-b22f-7485abc2e12b",
+      "name": "Ewdifh Fields",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        1328,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const j = item.json;\n  let url = (j.url || '').trim();\n  if (url && !url.startsWith('http')) {\n    url = 'https://www.ewdifh.com' + url;\n  }\n  return {\n    json: {\n      title: (j.title || '').trim(),\n      description: j.company ? `الشركة: ${j.company.trim()}` : '',\n      url,\n      date: (j.date || '').trim(),\n      source: 'ewdifh.com'\n    }\n  };\n}).filter(i => i.json.title);"
+      },
+      "id": "b5549fbe-44b4-4950-b364-bd31c5bfb693",
+      "name": "Format Ewdifh",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://linksjob.net",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "a001d94f-ee6b-4835-ab42-f19031c5f703",
+      "name": "Linksjob HTTP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        672,
+        752
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "cards",
+              "cssSelector": "article.listing-item",
+              "returnValue": "html",
+              "returnArray": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "11cb4104-df71-4e59-9a99-257e0b123886",
+      "name": "Linksjob Cards",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "cards",
+        "options": {}
+      },
+      "id": "0b8857f5-9b00-4b1b-904c-db8d579ad828",
+      "name": "Linksjob Split",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        1104,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "dataPropertyName": "cards",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "title",
+              "cssSelector": "a.post-url.post-title"
+            },
+            {
+              "key": "url",
+              "cssSelector": "a.post-url.post-title",
+              "returnValue": "attribute",
+              "attribute": "href"
+            },
+            {
+              "key": "date",
+              "cssSelector": "time.post-published"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "096f0815-a8e4-4cc1-8fd6-ed44c372c8d5",
+      "name": "Linksjob Fields",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        1328,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const j = item.json;\n  return {\n    json: {\n      title: (j.title || '').trim(),\n      description: '',\n      url: (j.url || '').trim(),\n      date: (j.date || '').trim(),\n      source: 'linksjob.net'\n    }\n  };\n}).filter(i => i.json.title);"
+      },
+      "id": "08066a6b-2859-464b-9163-6ef199588a1d",
+      "name": "Format Linksjob",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://wazefatee.com",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "747b9700-d766-4c70-9a19-505c0ef7a084",
+      "name": "Wazefatee HTTP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        672,
+        944
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "cards",
+              "cssSelector": "article.ast-article-post",
+              "returnValue": "html",
+              "returnArray": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "72405287-e6bb-4953-ad88-2b8b916719c9",
+      "name": "Wazefatee Cards",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "cards",
+        "options": {}
+      },
+      "id": "5c7ca717-b878-4269-9eac-9bd26cd3d035",
+      "name": "Wazefatee Split",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        1104,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "dataPropertyName": "cards",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "title",
+              "cssSelector": "h2.entry-title a"
+            },
+            {
+              "key": "url",
+              "cssSelector": "h2.entry-title a",
+              "returnValue": "attribute",
+              "attribute": "href"
+            },
+            {
+              "key": "date",
+              "cssSelector": "span.published"
+            },
+            {
+              "key": "description",
+              "cssSelector": "div.entry-content"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0e8328e4-363f-4f22-b42c-00a5e86b428a",
+      "name": "Wazefatee Fields",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        1328,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const j = item.json;\n  return {\n    json: {\n      title: (j.title || '').trim(),\n      description: (j.description || '').trim(),\n      url: (j.url || '').trim(),\n      date: (j.date || '').trim(),\n      source: 'wazefatee.com'\n    }\n  };\n}).filter(i => i.json.title);"
+      },
+      "id": "f8265ae2-3568-4be0-940c-79076998d27c",
+      "name": "Format Wazefatee",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://jadarat.sa/ExploreJobs?JobTab=1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "99098d06-74c6-457c-92b4-0e6b8f90bc68",
+      "name": "Jadarat HTTP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        672,
+        1152
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// jadarat.sa لا يعيد محتوى HTML بدون تشغيل JavaScript (يحتاج Headless Browser).\n// لذلك نعيد قائمة فارغة حالياً حتى لا يتسبب في كسر باقي الفروع.\nreturn [];"
+      },
+      "id": "70be4a1c-65b8-4152-b6a7-4c2edf9b6d06",
+      "name": "Format Jadarat",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        1152
+      ]
+    },
+    {
+      "parameters": {
+        "numberInputs": 5
+      },
+      "id": "9fc3641f-7d3e-4c64-ab1d-528495470892",
+      "name": "Merge Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.1,
+      "position": [
+        1888,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse comma-separated job titles into individual terms\nconst rawQuery = ($('Set Query').first().json.query || '').trim();\nconst terms = rawQuery\n  .split(',')\n  .map(t => t.trim())\n  .filter(t => t.length > 0);\n\nconst allJobs = items\n  .map(i => i.json)\n  .filter(j => j.title)\n  .map((j, idx) => ({\n    id: idx + 1,\n    title: j.title || '',\n    description: (j.description || '').slice(0, 400),\n    url: j.url || '',\n    date: j.date || '',\n    source: j.source || ''\n  }));\n\n// Pre-filter: keep only jobs that loosely match at least one term\n// (reduces token count sent to AI — AI does the precise relevance ranking)\nconst lowerTerms = terms.map(t => t.toLowerCase());\nconst filtered = allJobs.filter(j => {\n  const haystack = (j.title + ' ' + j.description).toLowerCase();\n  return lowerTerms.some(t => haystack.includes(t));\n});\n\n// If pre-filter is too strict (< 5 hits), fall back to all jobs so AI has enough to work with\nconst jobsForAI = filtered.length >= 5 ? filtered : allJobs;\n\nconst humanMessage =\n  `المسميات الوظيفية المطلوبة (${terms.length}): ${terms.map(t => `«${t}»`).join(' | ')}\\n` +\n  `إجمالي الوظائف المتاحة: ${jobsForAI.length} (من أصل ${allJobs.length})\\n\\n` +\n  `قائمة الوظائف:\\n${JSON.stringify(jobsForAI, null, 2)}`;\n\nreturn [{ json: { terms, rawQuery, humanMessage, totalJobs: jobsForAI.length } }];"
+      },
+      "id": "90a0f67c-b078-4140-8e62-35f2c16017c0",
+      "name": "Prepare for AI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2112,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.humanMessage }}",
+        "options": {
+          "systemMessage": "أنت مساعد ذكي متخصص في البحث عن الوظائف في السوق السعودي.\n\nسيُرسَل إليك قائمة وظائف ومجموعة من المسميات الوظيفية المطلوبة.\n\nمهمتك:\n1. لكل مسمى وظيفي مطلوب، ابحث في القائمة عن الوظائف ذات الصلة — افهم المسميات بذكاء:\n   - «محاسب» يشمل: مسؤول مالي، محلل مالي، أمين صندوق، مراجع حسابات\n   - «مطور ERP» يشمل: SAP، Oracle، Microsoft Dynamics، مطور أنظمة\n   - «محلل بيانات» يشمل: data analyst، تحليل البيانات، ذكاء اصطناعي، Power BI، SQL\n   - «مطور BI» يشمل: Business Intelligence، Power BI، Tableau، تقارير، لوحات بيانات\n   - وهكذا لأي مسمى آخر يُرسَل إليك\n2. نسّق الرد بهذه الطريقة:\n   - عنوان رئيسي لكل مسمى: 🔎 *نتائج: «المسمى»*\n   - اعرض بحد أقصى 5 وظائف لكل مسمى، مرتبة من الأعلى صلة للأدنى\n   - اذكر «لا توجد نتائج» للمسمى الذي لا يجد له وظائف\n3. شكل كل وظيفة:\n\n📌 *العنوان*\n📝 الوصف (جملة أو جملتين فقط، احذفه إن كان فارغاً)\n🔗 الرابط\n📅 التاريخ\n🌐 المصدر\n\n4. لا تكرر نفس الوظيفة تحت مسميين مختلفين.\n5. لا تخترع بيانات — استخدم فقط ما في القائمة.\n6. اكتب ردّك كاملاً باللغة العربية."
+        }
+      },
+      "id": "4c257380-11a9-459b-860f-897f263105a0",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        2352,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "f3e7fd88-4483-4311-acad-b55b490a5a8f",
+      "name": "OpenAI Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        2352,
+        960
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "YGjUJmZMbOR0Truo",
+          "name": "POE"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.output }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "c533732c-810b-4c77-bfda-d58d9ee251d1",
+      "name": "Telegram Send",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2720,
+        752
+      ],
+      "webhookId": "963a2fb2-be9e-4be6-9422-91c71d367750",
+      "credentials": {
+        "telegramApi": {
+          "id": "XByrOnfOTNPgY28e",
+          "name": "Jobs Finder"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Query": {
+      "main": [
+        [
+          {
+            "node": "Wadhefa RSS",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Ewdifh HTTP",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Linksjob HTTP",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wazefatee HTTP",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Jadarat HTTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wadhefa RSS": {
+      "main": [
+        [
+          {
+            "node": "Format Wadhefa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Wadhefa": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ewdifh HTTP": {
+      "main": [
+        [
+          {
+            "node": "Ewdifh Cards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ewdifh Cards": {
+      "main": [
+        [
+          {
+            "node": "Ewdifh Split",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ewdifh Split": {
+      "main": [
+        [
+          {
+            "node": "Ewdifh Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ewdifh Fields": {
+      "main": [
+        [
+          {
+            "node": "Format Ewdifh",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Ewdifh": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Linksjob HTTP": {
+      "main": [
+        [
+          {
+            "node": "Linksjob Cards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Linksjob Cards": {
+      "main": [
+        [
+          {
+            "node": "Linksjob Split",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Linksjob Split": {
+      "main": [
+        [
+          {
+            "node": "Linksjob Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Linksjob Fields": {
+      "main": [
+        [
+          {
+            "node": "Format Linksjob",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Linksjob": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Wazefatee HTTP": {
+      "main": [
+        [
+          {
+            "node": "Wazefatee Cards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wazefatee Cards": {
+      "main": [
+        [
+          {
+            "node": "Wazefatee Split",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wazefatee Split": {
+      "main": [
+        [
+          {
+            "node": "Wazefatee Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wazefatee Fields": {
+      "main": [
+        [
+          {
+            "node": "Format Wazefatee",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Wazefatee": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Jadarat HTTP": {
+      "main": [
+        [
+          {
+            "node": "Format Jadarat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Jadarat": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Merge Results": {
+      "main": [
+        [
+          {
+            "node": "Prepare for AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare for AI": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Telegram Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "c551d97e-d429-401f-8d7c-6ecf25c550ae",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8ef00a45189a8cb3e415a73d491319d77f1608e3d55c25240abef7ffb3daa060"
+  },
+  "id": "hiOetnLaAF8bvfIJ",
+  "tags": []
+}
